@@ -5,10 +5,6 @@ description = "Windows-first desktop computer-use agent"
 authors = ["open collar"]
 edition = "2021"
 
-[lib]
-name = "open_collar_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

@@ -46,9 +46,9 @@ export function RunDetails({
         <div className="summary-card">
           <div className="meta-row">
             <div>
-              <h3>{activeStep?.title ?? 'Plan ready'}</h3>
+              <h3>{activeStep?.title ?? run.summary ?? 'Plan ready'}</h3>
               <p className="meta-copy">
-                {activeStep?.goal ?? 'Waiting for the worker to produce a plan.'}
+                {run.summary ?? activeStep?.goal ?? 'Waiting for the worker to produce a plan.'}
               </p>
               <p className="meta-copy">
                 Model: <span className="mono">{run.modelProvider}:{run.modelName}</span>
@@ -100,7 +100,7 @@ export function RunDetails({
 
         <div className="panel">
           <div className="panel__header">
-            <h3>Plan and live logs</h3>
+            <h3>Plan</h3>
             <span className="badge">{run.steps.length} steps</span>
           </div>
           <div className="panel__body">
@@ -121,19 +121,9 @@ export function RunDetails({
                 </article>
               ))}
             </div>
-
-            <div className="log-list">
-              {run.events.map((event) => (
-                <article key={event.id} className="log-card">
-                  <div className="log-row">
-                    <strong>{event.eventType}</strong>
-                    <span className={`badge badge--${event.level}`}>{event.level}</span>
-                  </div>
-                  <p className="step-card__detail">{event.message}</p>
-                  <span className="muted mono">{new Date(event.createdAt).toLocaleTimeString()}</span>
-                </article>
-              ))}
-            </div>
+            {run.steps.length ? null : (
+              <div className="empty-state">The planner has not emitted step cards for this run yet.</div>
+            )}
           </div>
         </div>
       </div>

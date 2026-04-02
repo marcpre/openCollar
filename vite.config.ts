@@ -7,6 +7,9 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    watch: {
+      ignored: ['**/.venv/**', '**/src-tauri/target/**'],
+    },
   },
   preview: {
     port: 1420,

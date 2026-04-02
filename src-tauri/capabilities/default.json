@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Allows the main open collar window to use core Tauri IPC and event APIs.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

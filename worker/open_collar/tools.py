@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -121,6 +122,15 @@ class ToolRegistry:
             "notepad": ["notepad.exe"],
         }
         command = launch_targets.get(app.lower(), [app])
+        if app.lower() == "notepad++":
+            resolved = (
+                shutil.which("notepad++")
+                or shutil.which("notepad++.exe")
+                or shutil.which("C:\\Program Files\\Notepad++\\notepad++.exe")
+                or shutil.which("C:\\Program Files (x86)\\Notepad++\\notepad++.exe")
+            )
+            if resolved:
+                command = [resolved]
         try:
             process = subprocess.Popen(command)
         except FileNotFoundError as error:
@@ -212,9 +222,25 @@ class ToolRegistry:
 
     def get_active_window(self) -> ToolCallResult:
         self._ensure_windows()
-        from pywinauto import Desktop
+        from pywinauto import Desktop, findwindows
 
-        window = Desktop(backend="uia").get_active()
+        try:
+            window = Desktop(backend="uia").window(active_only=True).wrapper_object()
+        except Exception:
+            try:
+                active_element = findwindows.find_element(backend="uia", active_only=True)
+                window = Desktop(backend="uia").window(handle=active_element.handle).wrapper_object()
+            except Exception:
+                for candidate in Desktop(backend="uia").windows():
+                    try:
+                        if candidate.is_active():
+                            window = candidate
+                            break
+                    except Exception:
+                        continue
+                else:
+                    raise ToolExecutionError("active_window_unavailable", "Could not resolve the active window.")
+
         return ToolCallResult({"title": window.window_text()})
 
     def list_window_elements(self, title_contains: str) -> ToolCallResult:
