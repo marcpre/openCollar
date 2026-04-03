@@ -39,15 +39,19 @@ impl WorkerManager {
 
 enum WorkerLaunch {
     Executable(PathBuf),
-    PythonScript { python: String, script: PathBuf },
+    PythonScript {
+        python: PathBuf,
+        script: PathBuf,
+        python_path: PathBuf,
+    },
 }
 
 impl WorkerLaunch {
     fn describe(&self) -> String {
         match self {
             Self::Executable(path) => format!("packaged worker executable at {}", path.display()),
-            Self::PythonScript { python, script } => {
-                format!("python worker script via {python} {}", script.display())
+            Self::PythonScript { python, script, .. } => {
+                format!("python worker script via {} {}", python.display(), script.display())
             }
         }
     }
@@ -109,8 +113,35 @@ fn worker_script_path() -> Result<PathBuf, String> {
         })
 }
 
-fn python_command() -> String {
-    env::var("OPEN_COLLAR_PYTHON").unwrap_or_else(|_| "python".to_string())
+fn candidate_python_paths() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(explicit) = env::var("OPEN_COLLAR_PYTHON") {
+        candidates.push(PathBuf::from(explicit));
+    }
+
+    if let Ok(current_exe) = env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            candidates.push(exe_dir.join(".venv").join("Scripts").join("python.exe"));
+            candidates.push(exe_dir.join("..").join(".venv").join("Scripts").join("python.exe"));
+            candidates.push(exe_dir.join("..").join("..").join(".venv").join("Scripts").join("python.exe"));
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    if let Some(workspace_root) = manifest_dir.parent() {
+        candidates.push(workspace_root.join(".venv").join("Scripts").join("python.exe"));
+    }
+
+    candidates.push(PathBuf::from("python"));
+    candidates
+}
+
+fn python_command() -> PathBuf {
+    candidate_python_paths()
+        .into_iter()
+        .find(|candidate| candidate.file_name().is_some_and(|_| candidate.is_file()) || candidate == &PathBuf::from("python"))
+        .unwrap_or_else(|| PathBuf::from("python"))
 }
 
 fn resolve_worker_launch() -> Result<WorkerLaunch, String> {
@@ -121,9 +152,16 @@ fn resolve_worker_launch() -> Result<WorkerLaunch, String> {
         return Ok(WorkerLaunch::Executable(path));
     }
 
+    let script = worker_script_path()?;
+    let python_path = script
+        .parent()
+        .ok_or_else(|| "worker/main.py did not have a parent directory.".to_string())?
+        .to_path_buf();
+
     Ok(WorkerLaunch::PythonScript {
         python: python_command(),
-        script: worker_script_path()?,
+        script,
+        python_path,
     })
 }
 
@@ -139,9 +177,14 @@ where
 
     let mut command = match &launch {
         WorkerLaunch::Executable(path) => Command::new(path),
-        WorkerLaunch::PythonScript { python, script } => {
+        WorkerLaunch::PythonScript {
+            python,
+            script,
+            python_path,
+        } => {
             let mut command = Command::new(python);
             command.arg(script);
+            command.env("PYTHONPATH", python_path);
             command
         }
     };

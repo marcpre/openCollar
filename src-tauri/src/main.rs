@@ -58,18 +58,17 @@ fn start_run(
     let run_id = Uuid::new_v4().to_string();
     let timestamp = now_timestamp();
     let prompt = input.prompt.clone();
-    let mode = input.mode.clone();
-    let model_provider = input.model_config.provider.clone();
-    let model_name = input.model_config.model_name.clone();
-    let api_key = input.model_config.api_key.clone();
+    let model_provider = "gemini".to_string();
+    let model_name = "gemini-2.5-pro".to_string();
+    let api_key = input.api_key.clone();
     let run = RunRecord {
         id: run_id.clone(),
         prompt: prompt.clone(),
-        mode: mode.clone(),
+        mode: "auto".to_string(),
         model_provider: model_provider.clone(),
         model_name: model_name.clone(),
         state: "queued".to_string(),
-        summary: Some("Queued for planning.".to_string()),
+        summary: Some("Planning the task.".to_string()),
         error: None,
         created_at: timestamp.clone(),
         updated_at: timestamp.clone(),
@@ -103,10 +102,9 @@ fn start_run(
         &run_id,
         EventPayload {
             level: "info".to_string(),
-            event_type: "run_enqueued".to_string(),
-            message: "Run queued and sent to the Python worker.".to_string(),
+            event_type: "agent_started".to_string(),
+            message: "The agent is reviewing your request and preparing a plan.".to_string(),
             payload: Some(json!({
-                "mode": mode.clone(),
                 "prompt": prompt.clone(),
                 "modelProvider": model_provider.clone(),
                 "modelName": model_name.clone()
@@ -121,7 +119,6 @@ fn start_run(
         request_id: None,
         payload: json!({
             "prompt": prompt,
-            "mode": mode,
             "modelConfig": {
                 "provider": model_provider,
                 "modelName": model_name,
@@ -138,26 +135,6 @@ fn start_run(
 
     state.emit_snapshot(&app)?;
     Ok(run_id)
-}
-
-#[tauri::command]
-fn approve_step_group(
-    app: AppHandle,
-    state: State<'_, Arc<RuntimeState>>,
-    run_id: String,
-    group_index: usize,
-) -> Result<(), String> {
-    send_worker_control(&app, &state, "approve_step_group", run_id, json!({ "groupIndex": group_index }))
-}
-
-#[tauri::command]
-fn pause_run(app: AppHandle, state: State<'_, Arc<RuntimeState>>, run_id: String) -> Result<(), String> {
-    send_worker_control(&app, &state, "pause_run", run_id, json!({}))
-}
-
-#[tauri::command]
-fn resume_run(app: AppHandle, state: State<'_, Arc<RuntimeState>>, run_id: String) -> Result<(), String> {
-    send_worker_control(&app, &state, "resume_run", run_id, json!({}))
 }
 
 #[tauri::command]
@@ -192,7 +169,7 @@ fn send_worker_control(
         EventPayload {
             level: "info".to_string(),
             event_type: message_type.to_string(),
-            message: format!("Sent {message_type} to the Python worker."),
+            message: "Stop requested. The agent is stopping now.".to_string(),
             payload: None,
         },
     )?;
@@ -367,8 +344,8 @@ fn handle_worker_message(app: &AppHandle, state: Arc<RuntimeState>, line: String
             }
 
             with_run_mut(&state, &run_id, |run| {
-                run.state = "paused".to_string();
-                run.summary = Some("Plan created and waiting for approval.".to_string());
+                run.state = "running".to_string();
+                run.summary = Some("Plan ready. The agent is starting work.".to_string());
                 run.updated_at = now_timestamp();
                 Ok(())
             })?;
@@ -379,7 +356,6 @@ fn handle_worker_message(app: &AppHandle, state: Arc<RuntimeState>, line: String
                 serde_json::from_value(envelope.payload).map_err(|error| error.to_string())?;
             with_run_mut(&state, &run_id, |run| {
                 run.pending_approval = Some(payload);
-                run.state = "paused".to_string();
                 run.updated_at = now_timestamp();
                 Ok(())
             })?;
@@ -550,9 +526,6 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_app_snapshot,
             start_run,
-            approve_step_group,
-            pause_run,
-            resume_run,
             cancel_run
         ])
         .run(tauri::generate_context!())

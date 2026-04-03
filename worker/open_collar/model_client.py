@@ -13,7 +13,7 @@ class ModelClientError(RuntimeError):
 
 
 class PlanningModel(Protocol):
-    def plan_task(self, prompt: str, mode: str, tool_names: list[str]) -> dict[str, Any]:
+    def plan_task(self, prompt: str, tool_names: list[str]) -> dict[str, Any]:
         ...
 
 
@@ -36,8 +36,11 @@ def _planner_system_prompt(tool_names: list[str]) -> str:
         "You are the planner for a desktop computer-use agent. "
         "Return JSON only with keys summary and stepGroups. "
         "Each stepGroups item must be an array of step objects containing title, goal, toolName, toolArgs, verificationTarget, and fallbackNote. "
+        "Do not rename these keys. Use toolName exactly, not tool, action, command, or name. "
+        "toolArgs must always be an object, even when empty. "
         f"Only use these tool names: {', '.join(tool_names)}. "
-        "Never include shell commands or tools outside the whitelist."
+        "Never include shell commands or tools outside the whitelist. "
+        'Example: {"summary":"Open Notepad++ and type hello.","stepGroups":[[{"title":"Open Notepad++","goal":"Launch Notepad++.","toolName":"open_application","toolArgs":{"app":"notepad++"},"verificationTarget":"Notepad++ window visible","fallbackNote":"Stop if the app is unavailable."},{"title":"Wait for window","goal":"Wait until Notepad++ appears.","toolName":"wait_for_window","toolArgs":{"title_contains":"Notepad++","timeout_ms":15000},"verificationTarget":"Notepad++ window visible","fallbackNote":"Fail clearly if the window does not appear."},{"title":"Focus window","goal":"Bring Notepad++ to the foreground.","toolName":"focus_window","toolArgs":{"title_contains":"Notepad++"},"verificationTarget":"Notepad++ is active","fallbackNote":"Stop if another window keeps focus."},{"title":"Type text","goal":"Write hello opencollar into Notepad++.","toolName":"type_text","toolArgs":{"text":"hello opencollar"},"verificationTarget":"Text visible in the editor","fallbackNote":"Stop if typing does not land in the editor."}]]}'
     )
 
 
@@ -60,7 +63,7 @@ class NvidiaChatModel:
             return None
         return cls(endpoint=endpoint, api_key=api_key, model_name=model_name)
 
-    def plan_task(self, prompt: str, mode: str, tool_names: list[str]) -> dict[str, Any]:
+    def plan_task(self, prompt: str, tool_names: list[str]) -> dict[str, Any]:
         response = requests.post(
             self.endpoint,
             headers={
@@ -71,7 +74,7 @@ class NvidiaChatModel:
                 "model": self.model_name,
                 "messages": [
                     {"role": "system", "content": _planner_system_prompt(tool_names)},
-                    {"role": "user", "content": f"Mode: {mode}\nTask: {prompt}"},
+                    {"role": "user", "content": f"Task: {prompt}"},
                 ],
                 "max_tokens": self.max_tokens,
                 "temperature": self.temperature,
@@ -103,7 +106,7 @@ class GeminiChatModel:
     temperature: float = 0.2
     max_output_tokens: int = 4096
 
-    def plan_task(self, prompt: str, mode: str, tool_names: list[str]) -> dict[str, Any]:
+    def plan_task(self, prompt: str, tool_names: list[str]) -> dict[str, Any]:
         response = requests.post(
             f"{self.base_url}/models/{self.model_name}:generateContent",
             headers={
@@ -122,7 +125,7 @@ class GeminiChatModel:
                 "contents": [
                     {
                         "role": "user",
-                        "parts": [{"text": f"Mode: {mode}\nTask: {prompt}"}],
+                        "parts": [{"text": f"Task: {prompt}"}],
                     }
                 ],
             },
@@ -144,18 +147,13 @@ class GeminiChatModel:
 
 def create_model_client(model_config: dict[str, Any] | None) -> PlanningModel | None:
     config = dict(model_config or {})
-    provider = str(config.get("provider") or "deterministic")
-
-    if provider == "deterministic":
-        return None
+    provider = str(config.get("provider") or "gemini")
 
     if provider == "gemini":
         api_key = str(config.get("apiKey") or "").strip()
-        model_name = str(config.get("modelName") or "").strip()
+        model_name = str(config.get("modelName") or "gemini-2.5-pro").strip()
         if not api_key:
             raise ModelClientError("Gemini requires an API key entered by the user.")
-        if not model_name:
-            raise ModelClientError("Gemini requires a selected model name.")
         return GeminiChatModel(api_key=api_key, model_name=model_name)
 
     if provider == "nvidia":

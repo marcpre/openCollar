@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { EMPTY_SNAPSHOT } from './mock';
-import type { AppSnapshot, Mode, ModelConfig, StartRunInput } from './types';
+import type { AppSnapshot, StartRunInput } from './types';
 
 const STATE_EVENT = 'open-collar://state';
 
@@ -17,36 +17,12 @@ export async function getAppSnapshot(): Promise<AppSnapshot> {
   return invoke<AppSnapshot>('get_app_snapshot');
 }
 
-export async function startRun(input: StartRunInput): Promise<void> {
+export async function startRun(input: StartRunInput): Promise<string> {
   if (!isTauriRuntime()) {
-    return;
+    return 'mock-run';
   }
 
-  await invoke('start_run', { input });
-}
-
-export async function approveStepGroup(runId: string, groupIndex: number): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-
-  await invoke('approve_step_group', { runId, groupIndex });
-}
-
-export async function pauseRun(runId: string): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-
-  await invoke('pause_run', { runId });
-}
-
-export async function resumeRun(runId: string): Promise<void> {
-  if (!isTauriRuntime()) {
-    return;
-  }
-
-  await invoke('resume_run', { runId });
+  return invoke<string>('start_run', { input });
 }
 
 export async function cancelRun(runId: string): Promise<void> {
@@ -78,10 +54,3 @@ export function toAssetUrl(path: string): string {
 
   return isTauriRuntime() ? convertFileSrc(path) : path;
 }
-
-export const AVAILABLE_MODES: Mode[] = ['observe', 'assist', 'auto'];
-export const GEMINI_MODELS: ModelConfig[] = [
-  { provider: 'deterministic', modelName: 'deterministic-mvp' },
-  { provider: 'gemini', modelName: 'gemini-2.5-flash' },
-  { provider: 'gemini', modelName: 'gemini-2.5-pro' },
-];

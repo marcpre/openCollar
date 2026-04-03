@@ -14,15 +14,6 @@ export type StepState =
   | 'blocked'
   | 'cancelled';
 
-export type Mode = 'observe' | 'assist' | 'auto';
-export type ModelProvider = 'deterministic' | 'gemini';
-
-export interface ModelConfig {
-  provider: ModelProvider;
-  modelName: string;
-  apiKey?: string;
-}
-
 export interface StepRecord {
   id: string;
   runId: string;
@@ -75,9 +66,6 @@ export interface ApprovalRequest {
 export interface RunRecord {
   id: string;
   prompt: string;
-  mode: Mode;
-  modelProvider: ModelProvider;
-  modelName: string;
   state: RunState;
   summary: string | null;
   error: string | null;
@@ -100,6 +88,5 @@ export interface AppSnapshot {
 
 export interface StartRunInput {
   prompt: string;
-  mode: Mode;
-  modelConfig: ModelConfig;
+  apiKey?: string;
 }

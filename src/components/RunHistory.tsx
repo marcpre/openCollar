@@ -15,7 +15,7 @@ export function RunHistory({ runs, selectedRunId, onSelectRun }: RunHistoryProps
       </div>
       <div className="panel__body run-list">
         {runs.length === 0 ? (
-          <div className="empty-state">No runs yet. Start with the Notepad++ scenario to populate the timeline.</div>
+          <div className="empty-state">No runs yet. Start a task to populate the timeline.</div>
         ) : null}
 
         {runs.map((run) => (
@@ -27,11 +27,9 @@ export function RunHistory({ runs, selectedRunId, onSelectRun }: RunHistoryProps
           >
             <div className="run-card__top">
               <span className={`badge badge--${run.state}`}>{run.state}</span>
-              <span className="badge">{run.mode}</span>
             </div>
             <p className="run-card__prompt">{run.prompt}</p>
             <div className="meta-row">
-              <span className="muted mono">{run.modelProvider}:{run.modelName}</span>
               <span className="muted">{new Date(run.updatedAt).toLocaleString()}</span>
             </div>
           </button>

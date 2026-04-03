@@ -11,7 +11,7 @@ from typing import Any, TextIO
 from .browser import BrowserAutomation
 from .model_client import create_model_client
 from .planner import Planner
-from .schemas import ApprovalRequest, Envelope, RunPlan, StepRecord, now_timestamp
+from .schemas import Envelope, RunPlan, StepRecord, now_timestamp
 from .tools import ToolContext, ToolExecutionError, ToolRegistry
 
 
@@ -19,14 +19,12 @@ from .tools import ToolContext, ToolExecutionError, ToolRegistry
 class RunContext:
     run_id: str
     prompt: str
-    mode: str
     model_provider: str
     model_name: str
-    plan: RunPlan
+    model_config: dict[str, Any]
+    plan: RunPlan | None = None
     state: str = "queued"
     current_group_index: int = 0
-    waiting_for_approval: bool = False
-    pause_requested: bool = False
     cancelled: bool = False
     worker_thread: threading.Thread | None = None
 
@@ -52,7 +50,7 @@ class OutputChannel:
 class WorkerRuntime:
     def __init__(self, output: OutputChannel, tool_registry: ToolRegistry | None = None) -> None:
         app_data_root = self._resolve_app_data_dir()
-        context = ToolContext(artifact_dir=app_data_root / "artifacts", mode="assist")
+        context = ToolContext(artifact_dir=app_data_root / "artifacts")
         self.output = output
         self.browser = BrowserAutomation()
         self.tool_registry = tool_registry or ToolRegistry(context)
@@ -78,12 +76,6 @@ class WorkerRuntime:
     def handle_envelope(self, envelope: Envelope) -> None:
         if envelope.message_type == "start_run":
             self._start_run(envelope)
-        elif envelope.message_type == "approve_step_group":
-            self._approve_step_group(envelope)
-        elif envelope.message_type == "pause_run":
-            self._pause_run(envelope)
-        elif envelope.message_type == "resume_run":
-            self._resume_run(envelope)
         elif envelope.message_type == "cancel_run":
             self._cancel_run(envelope)
         elif envelope.message_type == "shutdown":
@@ -97,159 +89,53 @@ class WorkerRuntime:
             raise RuntimeError("start_run is missing run_id.")
 
         prompt = str(envelope.payload.get("prompt", ""))
-        mode = str(envelope.payload.get("mode", "assist"))
         model_config = dict(envelope.payload.get("modelConfig") or {})
-        model_provider = str(model_config.get("provider") or "deterministic")
-        model_name = str(model_config.get("modelName") or "deterministic-mvp")
-        self.tool_registry._context.mode = mode
-
-        planner = Planner(model_client=create_model_client(model_config))
-        plan = planner.build_plan(
-            run_id=run_id,
-            prompt=prompt,
-            mode=mode,
-            tool_names=self.tool_registry.tool_names,
-        )
+        model_provider = str(model_config.get("provider") or "gemini")
+        model_name = str(model_config.get("modelName") or "gemini-2.5-pro")
         context = RunContext(
             run_id=run_id,
             prompt=prompt,
-            mode=mode,
             model_provider=model_provider,
             model_name=model_name,
-            plan=plan,
+            model_config=model_config,
         )
 
         with self._lock:
             self._runs[run_id] = context
 
-        self.output.send("plan_created", run_id, {"steps": [step.for_transport() for step in plan.flattened_steps]})
         self.output.send(
             "run_updated",
             run_id,
             {
-                "state": "running" if mode == "auto" else "paused",
-                "summary": plan.summary,
+                "state": "queued",
+                "summary": "Planning the task.",
                 "error": None,
                 "startedAt": now_timestamp(),
                 "completedAt": None,
                 "pendingApproval": None,
             },
         )
-        self.output.send(
-            "event_logged",
-            run_id,
-            {
-                "level": "info",
-                "eventType": "planner_summary",
-                "message": plan.summary,
-                "payload": {
-                    "groups": len(plan.step_groups),
-                    "modelProvider": model_provider,
-                    "modelName": model_name,
-                },
-            },
-        )
+        self._spawn_worker(context, self._plan_and_run)
 
-        if mode == "observe":
-            self.output.send(
-                "approval_requested",
-                run_id,
-                ApprovalRequest(
-                    group_index=0,
-                    reason="Observe mode does not execute desktop actions. Review the plan in the center panel.",
-                ).to_dict(),
-            )
-            return
-
-        if mode == "assist":
-            context.waiting_for_approval = True
-            self.output.send(
-                "approval_requested",
-                run_id,
-                ApprovalRequest(
-                    group_index=0,
-                    reason="Assist mode pauses before each step group. Approve the first group to begin.",
-                ).to_dict(),
-            )
-            return
-
-        self._spawn_execution(context)
-
-    def _approve_step_group(self, envelope: Envelope) -> None:
+    def _cancel_run(self, envelope: Envelope) -> None:
         context = self._require_context(envelope.run_id)
-        requested_group = int(envelope.payload.get("groupIndex", -1))
-        if requested_group != context.current_group_index:
-            raise RuntimeError(
-                f"Approval requested for group {requested_group}, but the worker is waiting on {context.current_group_index}."
-            )
-
-        context.waiting_for_approval = False
-        self.output.send(
-            "run_updated",
-            context.run_id,
-            {
-                "state": "running",
-                "summary": f"Executing approved group {requested_group + 1}.",
-                "error": None,
-                "startedAt": None,
-                "completedAt": None,
-                "pendingApproval": None,
-            },
-        )
-        self._spawn_execution(context)
-
-    def _pause_run(self, envelope: Envelope) -> None:
-        context = self._require_context(envelope.run_id)
-        context.pause_requested = True
+        context.cancelled = True
         self.output.send(
             "event_logged",
             context.run_id,
             {
                 "level": "warn",
-                "eventType": "pause_requested",
-                "message": "Pause requested. The worker will stop after the current step finishes.",
+                "eventType": "run_cancelled",
+                "message": "The run was stopped by the user.",
                 "payload": None,
             },
         )
-
-    def _resume_run(self, envelope: Envelope) -> None:
-        context = self._require_context(envelope.run_id)
-        if context.waiting_for_approval and context.mode == "assist":
-            self.output.send(
-                "approval_requested",
-                context.run_id,
-                ApprovalRequest(
-                    group_index=context.current_group_index,
-                    reason="Assist mode still needs approval for the next step group.",
-                ).to_dict(),
-            )
-            return
-
-        context.pause_requested = False
-        self.output.send(
-            "run_updated",
-            context.run_id,
-            {
-                "state": "running",
-                "summary": "Resuming execution.",
-                "error": None,
-                "startedAt": None,
-                "completedAt": None,
-                "pendingApproval": None,
-            },
-        )
-        self._spawn_execution(context)
-
-    def _cancel_run(self, envelope: Envelope) -> None:
-        context = self._require_context(envelope.run_id)
-        context.cancelled = True
-        context.waiting_for_approval = False
         self.output.send(
             "run_updated",
             context.run_id,
             {
                 "state": "cancelled",
-                "summary": "Run cancelled by the user.",
+                "summary": "Run stopped by the user.",
                 "error": None,
                 "startedAt": None,
                 "completedAt": now_timestamp(),
@@ -258,63 +144,96 @@ class WorkerRuntime:
         )
 
     def _spawn_execution(self, context: RunContext) -> None:
+        self._spawn_worker(context, self._run_groups)
+
+    def _spawn_worker(self, context: RunContext, target: Any) -> None:
         if context.worker_thread and context.worker_thread.is_alive():
             return
-        thread = threading.Thread(target=self._run_groups, args=(context.run_id,), daemon=True)
+        thread = threading.Thread(target=target, args=(context.run_id,), daemon=True)
         context.worker_thread = thread
         thread.start()
+
+    def _plan_and_run(self, run_id: str) -> None:
+        try:
+            context = self._require_context(run_id)
+            planner = Planner(model_client=create_model_client(context.model_config))
+            plan = planner.build_plan(
+                run_id=run_id,
+                prompt=context.prompt,
+                tool_names=self.tool_registry.tool_names,
+            )
+            context.plan = plan
+
+            if context.cancelled:
+                return
+
+            self.output.send("plan_created", run_id, {"steps": [step.for_transport() for step in plan.flattened_steps]})
+            self.output.send(
+                "run_updated",
+                run_id,
+                {
+                    "state": "running",
+                    "summary": "Plan ready. The agent is starting work.",
+                    "error": None,
+                    "startedAt": None,
+                    "completedAt": None,
+                    "pendingApproval": None,
+                },
+            )
+            self.output.send(
+                "event_logged",
+                run_id,
+                {
+                    "level": "info",
+                    "eventType": "planner_summary",
+                    "message": plan.summary,
+                    "payload": {
+                        "groups": len(plan.step_groups),
+                        "modelProvider": context.model_provider,
+                        "modelName": context.model_name,
+                    },
+                },
+            )
+            self._run_groups(run_id)
+        except Exception as error:  # pragma: no cover - defensive event path
+            self.output.send(
+                "run_updated",
+                run_id,
+                {
+                    "state": "failed",
+                    "summary": "Run failed during planning.",
+                    "error": f"Planning failed: {error}",
+                    "startedAt": None,
+                    "completedAt": now_timestamp(),
+                    "pendingApproval": None,
+                },
+            )
+            self.output.send(
+                "worker_error",
+                run_id,
+                {
+                    "level": "error",
+                    "eventType": "execution_failed",
+                    "message": traceback.format_exc(),
+                    "payload": None,
+                },
+            )
 
     def _run_groups(self, run_id: str) -> None:
         try:
             context = self._require_context(run_id)
+            if context.plan is None:
+                raise RuntimeError("Planning did not produce a run plan.")
+
             while context.current_group_index < len(context.plan.step_groups):
                 if context.cancelled:
-                    return
-                if context.pause_requested:
-                    context.pause_requested = False
-                    self.output.send(
-                        "run_updated",
-                        run_id,
-                        {
-                            "state": "paused",
-                            "summary": "Execution paused.",
-                            "error": None,
-                            "startedAt": None,
-                            "completedAt": None,
-                            "pendingApproval": None,
-                        },
-                    )
                     return
 
                 self._execute_group(context)
                 context.current_group_index += 1
 
-                if context.mode == "assist" and context.current_group_index < len(context.plan.step_groups):
-                    context.waiting_for_approval = True
-                    self.output.send(
-                        "approval_requested",
-                        run_id,
-                        ApprovalRequest(
-                            group_index=context.current_group_index,
-                            reason="Assist mode pauses before the next step group.",
-                        ).to_dict(),
-                    )
-                    self.output.send(
-                        "run_updated",
-                        run_id,
-                        {
-                            "state": "paused",
-                            "summary": f"Waiting for approval on group {context.current_group_index + 1}.",
-                            "error": None,
-                            "startedAt": None,
-                            "completedAt": None,
-                            "pendingApproval": ApprovalRequest(
-                                group_index=context.current_group_index,
-                                reason="Assist mode pauses before the next step group.",
-                            ).to_dict(),
-                        },
-                    )
-                    return
+            if context.cancelled:
+                return
 
             self.output.send(
                 "run_updated",
@@ -353,6 +272,8 @@ class WorkerRuntime:
             )
 
     def _execute_group(self, context: RunContext) -> None:
+        if context.plan is None:
+            raise RuntimeError("Planning did not produce a run plan.")
         group = context.plan.step_groups[context.current_group_index]
         for step in group:
             if context.cancelled:
@@ -369,9 +290,21 @@ class WorkerRuntime:
             context.run_id,
             {
                 "level": "info",
-                "eventType": "tool_call",
-                "message": f"{step.tool_name}({step.tool_args})",
-                "payload": {"toolName": step.tool_name, "args": step.tool_args},
+                "eventType": "step_started",
+                "message": f"Working on: {step.title}. {step.goal}",
+                "payload": {"stepId": step.id, "toolName": step.tool_name},
+            },
+        )
+        self.output.send(
+            "run_updated",
+            context.run_id,
+            {
+                "state": "running",
+                "summary": step.goal,
+                "error": None,
+                "startedAt": None,
+                "completedAt": None,
+                "pendingApproval": None,
             },
         )
 
@@ -387,11 +320,14 @@ class WorkerRuntime:
                 {
                     "level": "error",
                     "eventType": "tool_error",
-                    "message": str(error),
-                    "payload": {"toolName": step.tool_name, "code": error.code},
+                    "message": f'The plan for "{step.title}" failed. {error}',
+                    "payload": {"toolName": step.tool_name, "code": error.code, "stepTitle": step.title},
                 },
             )
             raise
+
+        if context.cancelled:
+            return
 
         step.state = "done"
         step.completed_at = now_timestamp()
@@ -402,8 +338,8 @@ class WorkerRuntime:
             context.run_id,
             {
                 "level": "info",
-                "eventType": "tool_result",
-                "message": f"{step.tool_name} completed successfully.",
+                "eventType": "step_completed",
+                "message": f"Completed: {step.title}.",
                 "payload": result.data,
             },
         )

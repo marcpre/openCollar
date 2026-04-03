@@ -8,7 +8,7 @@ const GEMINI_API_KEY_STORAGE = 'open-collar.gemini-api-key';
 
 function App() {
   const { snapshot, loading, error, actions } = useOpenCollarApp();
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [geminiApiKey, setGeminiApiKey] = useState('');
 
@@ -36,24 +36,13 @@ function App() {
   }, [geminiApiKey]);
 
   const runs = snapshot?.runs ?? EMPTY_SNAPSHOT.runs;
-  const selectedId = useMemo(() => {
-    if (selectedRunId && runs.some((run) => run.id === selectedRunId)) {
-      return selectedRunId;
+  const currentRun = useMemo(() => {
+    if (!currentRunId) {
+      return null;
     }
 
-    return snapshot?.selectedRunId ?? runs[0]?.id ?? null;
-  }, [runs, selectedRunId, snapshot?.selectedRunId]);
-
-  const currentRun = useMemo(
-    () => runs.find((run) => run.id === selectedId) ?? null,
-    [runs, selectedId],
-  );
-
-  useEffect(() => {
-    if (currentRun?.id) {
-      setSelectedRunId(currentRun.id);
-    }
-  }, [currentRun?.id]);
+    return runs.find((run) => run.id === currentRunId) ?? null;
+  }, [runs, currentRunId]);
 
   return (
     <div className="app-shell">
@@ -83,7 +72,7 @@ function App() {
           <div className="settings-popover__header">
             <h2>Settings</h2>
             <button type="button" className="icon-button icon-button--small" onClick={() => setSettingsOpen(false)}>
-              ×
+              x
             </button>
           </div>
           <label className="composer__label" htmlFor="geminiApiKey">
@@ -97,21 +86,22 @@ function App() {
             onChange={(event) => setGeminiApiKey(event.target.value)}
             placeholder="Paste your Gemini API key"
           />
-          <p className="hint">Used for Gemini runs from this chat window.</p>
+          <p className="hint">Used for the single Gemini agent experience.</p>
         </section>
       ) : null}
 
       {error ? <div className="banner banner--error">{error}</div> : null}
-      {loading ? <div className="banner">Loading chat…</div> : null}
+      {loading ? <div className="banner">Loading chat...</div> : null}
 
       <main className="workspace workspace--single">
         <PromptComposer
           run={currentRun}
           geminiApiKey={geminiApiKey}
-          onStartRun={actions.startRun}
-          onApprove={actions.approveStepGroup}
-          onPause={actions.pauseRun}
-          onResume={actions.resumeRun}
+          onStartRun={async (prompt, apiKey) => {
+            const runId = await actions.startRun(prompt, apiKey);
+            setCurrentRunId(runId);
+            return runId;
+          }}
           onCancel={actions.cancelRun}
         />
       </main>

@@ -131,8 +131,8 @@ button {
 }
 
 .settings-popover,
+.agent-shell,
 .chat-shell,
-.approval-banner,
 .message,
 .composer,
 .banner {
@@ -166,44 +166,55 @@ button {
   display: block;
 }
 
-.chat-shell {
+.agent-shell {
   display: grid;
   min-height: 0;
   height: calc(100vh - 132px);
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   padding: 14px;
 }
 
-.approval-banner {
-  padding: 14px;
-  background: linear-gradient(180deg, rgba(88, 166, 255, 0.08), rgba(88, 166, 255, 0.03));
-}
-
-.approval-banner__copy p:last-child {
-  margin-bottom: 0;
-}
-
-.approval-options {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-  margin-top: 12px;
-}
-
-.approval-card {
+.agent-shell__header,
+.observer-card__header,
+.message__meta,
+.composer__footer,
+.status-strip {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  color: inherit;
-  text-align: left;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.approval-card p,
+.agent-shell__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(280px, 0.8fr);
+  gap: 12px;
+  min-height: 0;
+}
+
+.chat-shell {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.observer-panel {
+  display: grid;
+  gap: 12px;
+  min-height: 0;
+  align-content: start;
+}
+
+.observer-card {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.observer-card p,
 .message p,
 .hint,
 .empty-state {
@@ -211,24 +222,17 @@ button {
   color: var(--text-muted);
 }
 
-.approval-card--recommended {
-  border-color: rgba(88, 166, 255, 0.5);
-  background: rgba(88, 166, 255, 0.09);
+.observer-card--artifact {
+  overflow: hidden;
 }
 
-.approval-card--danger {
-  border-color: rgba(255, 123, 114, 0.35);
-}
-
-.approval-card__top,
-.message__meta,
-.composer__footer,
-.composer__controls,
-.status-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+.observer-card__image {
+  width: 100%;
+  max-height: 220px;
+  object-fit: cover;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
 }
 
 .chat-feed {
@@ -245,20 +249,15 @@ button {
   padding: 12px 14px;
 }
 
-.message--you {
+.message--user {
   align-self: flex-end;
   background: rgba(88, 166, 255, 0.1);
   border-color: rgba(88, 166, 255, 0.4);
 }
 
-.message--model {
+.message--assistant {
   align-self: flex-start;
   background: rgba(76, 195, 138, 0.08);
-}
-
-.message--system {
-  align-self: flex-start;
-  background: rgba(255, 255, 255, 0.03);
 }
 
 .message__meta {
@@ -286,19 +285,6 @@ button {
   resize: vertical;
 }
 
-.composer__controls {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-}
-
-.field--small {
-  width: 120px;
-}
-
-.field--medium {
-  width: 150px;
-}
-
 .composer__label {
   display: block;
   margin-bottom: 8px;
@@ -319,6 +305,12 @@ button {
 .button--primary {
   background: #0e639c;
   border-color: #1177bb;
+}
+
+.button--danger {
+  background: rgba(255, 123, 114, 0.12);
+  border-color: rgba(255, 123, 114, 0.35);
+  color: #ffd6d2;
 }
 
 .button:disabled {
@@ -350,6 +342,17 @@ button {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.badge--completed {
+  background: rgba(76, 195, 138, 0.14);
+  color: #8df0b9;
+}
+
+.badge--failed,
+.badge--cancelled {
+  background: rgba(255, 123, 114, 0.14);
+  color: #ffd6d2;
+}
+
 .muted {
   color: var(--text-muted);
 }
@@ -379,11 +382,11 @@ button {
     padding: 12px;
   }
 
-  .chat-shell {
+  .agent-shell {
     height: calc(100vh - 116px);
   }
 
-  .approval-options {
+  .agent-shell__body {
     grid-template-columns: 1fr;
   }
 

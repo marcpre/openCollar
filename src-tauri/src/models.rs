@@ -4,14 +4,6 @@ use serde_json::Value;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ModelConfig {
-    pub provider: String,
-    pub model_name: String,
-    pub api_key: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AppSnapshot {
     pub worker_status: String,
     pub selected_run_id: Option<String>,
@@ -113,32 +105,13 @@ pub struct ArtifactRecord {
 #[serde(rename_all = "camelCase")]
 pub struct StartRunInput {
     pub prompt: String,
-    pub mode: String,
-    pub model_config: ModelConfig,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkerEnvelope {
-    #[serde(rename = "type")]
-    pub message_type: String,
-    pub run_id: Option<String>,
-    pub timestamp: String,
-    pub request_id: Option<String>,
-    pub payload: Value,
+    pub api_key: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanCreatedPayload {
     pub steps: Vec<StepRecord>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApprovalRequestedPayload {
-    pub group_index: usize,
-    pub reason: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -182,6 +155,17 @@ pub struct RunUpdatedPayload {
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub pending_approval: Option<ApprovalRequest>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerEnvelope {
+    #[serde(rename = "type")]
+    pub message_type: String,
+    pub run_id: Option<String>,
+    pub timestamp: String,
+    pub request_id: Option<String>,
+    pub payload: Value,
 }
 
 pub fn now_timestamp() -> String {

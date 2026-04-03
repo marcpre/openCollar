@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  approveStepGroup,
   cancelRun,
   getAppSnapshot,
   listenForSnapshots,
-  pauseRun,
-  resumeRun,
   startRun,
 } from '../lib/tauri';
 import { EMPTY_SNAPSHOT } from '../lib/mock';
-import type { AppSnapshot, Mode, ModelConfig } from '../lib/types';
+import type { AppSnapshot } from '../lib/types';
 
 export function useOpenCollarApp() {
   const [snapshot, setSnapshot] = useState<AppSnapshot>(EMPTY_SNAPSHOT);
@@ -60,12 +57,9 @@ export function useOpenCollarApp() {
     loading,
     error,
     actions: {
-      startRun: async (prompt: string, mode: Mode, modelConfig: ModelConfig) => {
-        await startRun({ prompt, mode, modelConfig });
+      startRun: async (prompt: string, apiKey?: string) => {
+        return startRun({ prompt, apiKey });
       },
-      approveStepGroup,
-      pauseRun,
-      resumeRun,
       cancelRun,
     },
   };

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -9,9 +8,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
-
-
-READ_ONLY_TOOLS = {"wait_for_window", "read_window_text", "verify_path_exists", "get_active_window", "list_window_elements", "capture_screenshot"}
 
 
 class ToolExecutionError(RuntimeError):
@@ -28,7 +24,6 @@ class ToolCallResult:
 @dataclass(slots=True)
 class ToolContext:
     artifact_dir: Path
-    mode: str
 
 
 class ToolRegistry:
@@ -59,13 +54,10 @@ class ToolRegistry:
         if tool_name not in self._handlers:
             raise ToolExecutionError("tool_not_whitelisted", f"Unknown tool {tool_name!r}.")
 
-        if self._context.mode == "observe" and tool_name not in READ_ONLY_TOOLS:
-            raise ToolExecutionError("observe_mode_blocked", f"{tool_name} is blocked in observe mode.")
+        normalized_args = self._validate(tool_name, args)
+        return self._handlers[tool_name](**normalized_args)
 
-        self._validate(tool_name, args)
-        return self._handlers[tool_name](**args)
-
-    def _validate(self, tool_name: str, args: dict[str, Any]) -> None:
+    def _validate(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         required: dict[str, tuple[str, ...]] = {
             "create_folder": ("path",),
             "open_application": ("app",),
@@ -85,6 +77,69 @@ class ToolRegistry:
         missing = [name for name in required[tool_name] if name not in args]
         if missing:
             raise ToolExecutionError("validation_error", f"Missing arguments for {tool_name}: {', '.join(missing)}")
+
+        normalized = dict(args)
+        if tool_name in {"create_folder", "open_application", "focus_window", "read_window_text", "save_file_as", "verify_path_exists", "list_window_elements"}:
+            string_key = {
+                "create_folder": "path",
+                "open_application": "app",
+                "focus_window": "title_contains",
+                "read_window_text": "title_contains",
+                "save_file_as": "path",
+                "verify_path_exists": "path",
+                "list_window_elements": "title_contains",
+            }[tool_name]
+            normalized[string_key] = self._coerce_string(tool_name, string_key, normalized[string_key])
+        elif tool_name == "wait_for_window":
+            normalized["title_contains"] = self._coerce_string(tool_name, "title_contains", normalized["title_contains"])
+            normalized["timeout_ms"] = self._coerce_int(tool_name, "timeout_ms", normalized["timeout_ms"])
+        elif tool_name == "click_element":
+            normalized["window"] = self._coerce_string(tool_name, "window", normalized["window"])
+            normalized["selector"] = self._coerce_string(tool_name, "selector", normalized["selector"])
+        elif tool_name == "click_coordinates":
+            normalized["x"] = self._coerce_int(tool_name, "x", normalized["x"])
+            normalized["y"] = self._coerce_int(tool_name, "y", normalized["y"])
+        elif tool_name == "type_text":
+            normalized["text"] = self._coerce_string(tool_name, "text", normalized["text"])
+        elif tool_name == "press_keys":
+            normalized["keys"] = self._coerce_string(tool_name, "keys", normalized["keys"])
+
+        return normalized
+
+    def _coerce_string(self, tool_name: str, field_name: str, value: Any) -> str:
+        if isinstance(value, str) and value.strip():
+            return value
+        if isinstance(value, list) and len(value) == 1 and isinstance(value[0], str) and value[0].strip():
+            return value[0]
+        actual_type = type(value).__name__
+        raise ToolExecutionError(
+            "validation_error",
+            f"{tool_name}.{field_name} must be a string, but received {actual_type}.",
+        )
+
+    def _coerce_int(self, tool_name: str, field_name: str, value: Any) -> int:
+        if isinstance(value, bool):
+            raise ToolExecutionError(
+                "validation_error",
+                f"{tool_name}.{field_name} must be an integer, but received bool.",
+            )
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        if isinstance(value, str):
+            try:
+                return int(value.strip())
+            except ValueError as error:
+                raise ToolExecutionError(
+                    "validation_error",
+                    f"{tool_name}.{field_name} must be an integer, but received str.",
+                ) from error
+        actual_type = type(value).__name__
+        raise ToolExecutionError(
+            "validation_error",
+            f"{tool_name}.{field_name} must be an integer, but received {actual_type}.",
+        )
 
     def _ensure_windows(self) -> None:
         if not sys.platform.startswith("win"):
@@ -261,18 +316,61 @@ class ToolRegistry:
 
 class FakeToolRegistry(ToolRegistry):
     def __init__(self) -> None:
-        super().__init__(ToolContext(artifact_dir=Path.cwd() / ".tmp-artifacts", mode="assist"))
+        super().__init__(ToolContext(artifact_dir=Path.cwd() / ".tmp-artifacts"))
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
     def execute(self, tool_name: str, args: dict[str, Any]) -> ToolCallResult:
         self.calls.append((tool_name, json.loads(json.dumps(args))))
+        result = super().execute(tool_name, args)
         if tool_name == "capture_screenshot":
             target = self._context.artifact_dir / "fake-screenshot.png"
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("fake", encoding="utf-8")
             return ToolCallResult({"path": str(target), "kind": "screenshot"})
         if tool_name == "verify_path_exists":
-            return ToolCallResult({"path": args["path"], "exists": True})
+            return ToolCallResult({"path": result.data["path"], "exists": True})
         if tool_name == "get_active_window":
             return ToolCallResult({"title": "Notepad++"})
-        return ToolCallResult(args or {"ok": True})
+        return result
+
+    def create_folder(self, path: str) -> ToolCallResult:
+        return ToolCallResult({"path": path, "created": True})
+
+    def open_application(self, app: str) -> ToolCallResult:
+        return ToolCallResult({"app": app, "pid": 1234})
+
+    def wait_for_window(self, title_contains: str, timeout_ms: int) -> ToolCallResult:
+        return ToolCallResult({"title": title_contains})
+
+    def focus_window(self, title_contains: str) -> ToolCallResult:
+        return ToolCallResult({"title": title_contains, "focused": True})
+
+    def click_element(self, window: str, selector: str) -> ToolCallResult:
+        return ToolCallResult({"window": window, "selector": selector})
+
+    def click_coordinates(self, x: int, y: int) -> ToolCallResult:
+        return ToolCallResult({"x": x, "y": y})
+
+    def type_text(self, text: str) -> ToolCallResult:
+        return ToolCallResult({"characters": len(text)})
+
+    def press_keys(self, keys: str) -> ToolCallResult:
+        return ToolCallResult({"keys": keys})
+
+    def read_window_text(self, title_contains: str) -> ToolCallResult:
+        return ToolCallResult({"title": title_contains, "text": ""})
+
+    def save_file_as(self, path: str) -> ToolCallResult:
+        return ToolCallResult({"path": path})
+
+    def verify_path_exists(self, path: str) -> ToolCallResult:
+        return ToolCallResult({"path": path, "exists": True})
+
+    def capture_screenshot(self) -> ToolCallResult:
+        target = self._context.artifact_dir / "fake-screenshot.png"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("fake", encoding="utf-8")
+        return ToolCallResult({"path": str(target), "kind": "screenshot"})
+
+    def list_window_elements(self, title_contains: str) -> ToolCallResult:
+        return ToolCallResult({"window": title_contains, "elements": []})

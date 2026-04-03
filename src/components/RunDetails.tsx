@@ -2,19 +2,10 @@ import type { RunRecord } from '../lib/types';
 
 interface RunDetailsProps {
   run: RunRecord | null;
-  onApprove: (runId: string, groupIndex: number) => Promise<void>;
-  onPause: (runId: string) => Promise<void>;
-  onResume: (runId: string) => Promise<void>;
   onCancel: (runId: string) => Promise<void>;
 }
 
-export function RunDetails({
-  run,
-  onApprove,
-  onPause,
-  onResume,
-  onCancel,
-}: RunDetailsProps) {
+export function RunDetails({ run, onCancel }: RunDetailsProps) {
   if (!run) {
     return (
       <section className="panel">
@@ -50,36 +41,11 @@ export function RunDetails({
               <p className="meta-copy">
                 {run.summary ?? activeStep?.goal ?? 'Waiting for the worker to produce a plan.'}
               </p>
-              <p className="meta-copy">
-                Model: <span className="mono">{run.modelProvider}:{run.modelName}</span>
-              </p>
             </div>
-            <span className="badge">{run.mode}</span>
+            <span className={`badge badge--${run.state}`}>{run.state}</span>
           </div>
 
           <div className="toolbar-row">
-            {run.pendingApproval ? (
-              <button
-                type="button"
-                className="button button--primary"
-                onClick={() => onApprove(run.id, run.pendingApproval!.groupIndex)}
-              >
-                Approve group {run.pendingApproval.groupIndex + 1}
-              </button>
-            ) : null}
-
-            {run.state === 'running' ? (
-              <button type="button" className="button" onClick={() => onPause(run.id)}>
-                Pause
-              </button>
-            ) : null}
-
-            {run.state === 'paused' ? (
-              <button type="button" className="button" onClick={() => onResume(run.id)}>
-                Resume
-              </button>
-            ) : null}
-
             {run.state !== 'completed' && run.state !== 'cancelled' ? (
               <button type="button" className="button button--danger" onClick={() => onCancel(run.id)}>
                 Stop
@@ -87,16 +53,6 @@ export function RunDetails({
             ) : null}
           </div>
         </div>
-
-        {run.pendingApproval ? (
-          <div className="approval-card">
-            <h3>Approval required</h3>
-            <p className="meta-copy">
-              Group {run.pendingApproval.groupIndex + 1} is waiting for confirmation.
-            </p>
-            <p className="meta-copy">{run.pendingApproval.reason}</p>
-          </div>
-        ) : null}
 
         <div className="panel">
           <div className="panel__header">
